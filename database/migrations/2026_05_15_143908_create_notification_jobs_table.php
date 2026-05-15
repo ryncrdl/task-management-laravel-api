@@ -27,6 +27,7 @@ return new class extends Migration
             $table->timestampTz('scheduled_at')->useCurrent();
             $table->timestampTz('processed_at')->nullable();
             $table->timestampTz('created_at')->useCurrent();
+            $table->timestampTz('updated_at')->useCurrent();
         });
     }
 

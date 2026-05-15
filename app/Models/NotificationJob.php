@@ -11,7 +11,7 @@ class NotificationJob extends Model
     protected $fillable = [
         'task_id', 'user_id', 'event_type', 'details',
         'status', 'attempts', 'error_message',
-        'scheduled_at', 'processed_at', 'created_at',
+        'scheduled_at', 'processed_at', 'created_at', 'updated_at',
     ];
 
     protected function casts(): array
@@ -21,6 +21,7 @@ class NotificationJob extends Model
             'scheduled_at' => 'datetime',
             'processed_at' => 'datetime',
             'created_at'   => 'datetime',
+            'updated_at'   => 'datetime',
         ];
     }
 }

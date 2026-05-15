@@ -44,7 +44,16 @@ class NotificationJobController extends Controller
      */
     public function claimPending(): JsonResponse
     {
-        $ids = NotificationJob::where('status', 'pending')
+        $staleThreshold = now()->subMinutes(2);
+
+        // Pick up pending jobs AND jobs stuck in 'processing' for >2 minutes
+        $ids = NotificationJob::where(function ($q) use ($staleThreshold) {
+                $q->where('status', 'pending')
+                  ->orWhere(function ($q2) use ($staleThreshold) {
+                      $q2->where('status', 'processing')
+                         ->where('updated_at', '<', $staleThreshold);
+                  });
+            })
             ->orderBy('scheduled_at')
             ->limit(20)
             ->pluck('id');
@@ -53,7 +62,7 @@ class NotificationJobController extends Controller
             return response()->json(['data' => []]);
         }
 
-        NotificationJob::whereIn('id', $ids)->update(['status' => 'processing']);
+        NotificationJob::whereIn('id', $ids)->update(['status' => 'processing', 'updated_at' => now()]);
 
         $jobs = NotificationJob::whereIn('id', $ids)->get();
 
