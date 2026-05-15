@@ -107,7 +107,14 @@ class TaskCommentController extends Controller
             return true;
         }
 
-        return $task->team->hasMember($authUser);
+        // Members can comment on tasks assigned to them
+        if ($authUser->isMember()) {
+            return $task->assigned_to === $authUser->id;
+        }
+
+        // Managers must be in the same team
+        $team = $task->team;
+        return $team && $team->hasMember($authUser);
     }
 
     private function broadcastMentions(string $body, Task $task, $comment, $authUser): void
