@@ -339,9 +339,9 @@ class TaskController extends Controller
             return $this->error('Task must be cancelled for at least 30 days before archiving.', 422);
         }
 
-        $task->forceDelete();
+        $task->delete(); // soft delete — preserves audit trail
 
-        Log::info('Task archived (force deleted)', ['task_id' => $task->id]);
+        Log::info('Task archived (soft deleted)', ['task_id' => $task->id]);
 
         return $this->success(null, 'Task archived successfully.');
     }

@@ -16,6 +16,20 @@ use Illuminate\Support\Facades\Log;
 class TeamController extends Controller
 {
     /**
+     * List all teams for internal/cron use (no auth filtering).
+     * GET /api/internal/teams
+     */
+    public function indexInternal(): JsonResponse
+    {
+        $teams = Team::with(['creator:id,name'])
+            ->withCount('members')
+            ->orderBy('name')
+            ->get();
+
+        return response()->json(['data' => $teams]);
+    }
+
+    /**
      * List teams (paginated).
      * GET /api/teams
      */
