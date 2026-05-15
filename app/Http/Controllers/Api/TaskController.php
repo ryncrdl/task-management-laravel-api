@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Task\StoreTaskRequest;
 use App\Http\Requests\Task\UpdateTaskRequest;
 use App\Http\Requests\Task\UpdateTaskStatusRequest;
-use App\Mail\TaskAssignedMail;
 use App\Models\Task;
 use App\Models\Team;
 use Illuminate\Http\JsonResponse;
@@ -14,7 +13,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 
 class TaskController extends Controller
 {
@@ -168,24 +166,10 @@ class TaskController extends Controller
 
         $task->load(['assignedTo:id,name,email', 'createdBy:id,name', 'team:id,name']);
 
-        // Notify Node.js service asynchronously (fire & forget)
+        // Notify Node.js service asynchronously (fire & forget).
+        // Node.js handles the assignment email; no synchronous SMTP call here.
         if ($task->assigned_to) {
             $this->notifyNodeService($task, 'assigned');
-
-            // Send email notification to the assignee
-            try {
-                $assignee = $task->assignedTo;
-                if ($assignee && config('mail.default') !== 'log' || config('mail.mailers.smtp.host')) {
-                    Mail::to($assignee->email)->send(
-                        new TaskAssignedMail($task, $assignee, $authUser)
-                    );
-                }
-            } catch (\Exception $e) {
-                Log::warning('Task assignment email failed', [
-                    'task_id' => $task->id,
-                    'error'   => $e->getMessage(),
-                ]);
-            }
         }
 
         // Broadcast task created to team room + assignee's personal room
