@@ -370,14 +370,14 @@ class TaskController extends Controller
             return true;
         }
 
-        // Must be in the same team
-        $team = $task->team;
-        if (! $team->hasMember($user)) {
-            return false;
+        // Members can always access tasks assigned to them regardless of team
+        if ($user->isMember()) {
+            return $task->assigned_to === $user->id;
         }
 
-        // Members can only see their own assigned tasks
-        if ($user->isMember() && $task->assigned_to !== $user->id) {
+        // Managers must be in the same team
+        $team = $task->team;
+        if (! $team || ! $team->hasMember($user)) {
             return false;
         }
 
@@ -390,13 +390,14 @@ class TaskController extends Controller
             return true;
         }
 
-        $team = $task->team;
-        if (! $team->hasMember($user)) {
-            return false;
+        // Members can only edit tasks assigned to them
+        if ($user->isMember()) {
+            return $task->assigned_to === $user->id;
         }
 
-        // Team Members can only edit tasks assigned to them
-        if ($user->isMember() && $task->assigned_to !== $user->id) {
+        // Managers must be in the same team
+        $team = $task->team;
+        if (! $team || ! $team->hasMember($user)) {
             return false;
         }
 
