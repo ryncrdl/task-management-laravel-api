@@ -55,6 +55,36 @@ class TaskController extends Controller
     }
 
     /**
+     * List tasks for a team for internal/cron use (no auth filtering).
+     * GET /api/internal/teams/{team}/tasks
+     */
+    public function indexInternal(Request $request, Team $team): JsonResponse
+    {
+        $query = Task::with(['assignedTo:id,name,email', 'createdBy:id,name'])
+            ->where('team_id', $team->id);
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+        if ($request->filled('priority')) {
+            $query->where('priority', $request->priority);
+        }
+
+        $tasks = $query->orderBy('created_at', 'desc')
+            ->paginate($request->get('per_page', 500));
+
+        return response()->json([
+            'data' => $tasks->items(),
+            'meta' => [
+                'current_page' => $tasks->currentPage(),
+                'last_page'    => $tasks->lastPage(),
+                'per_page'     => $tasks->perPage(),
+                'total'        => $tasks->total(),
+            ],
+        ]);
+    }
+
+    /**
      * List tasks for a team with optional filters.
      * GET /api/teams/{team}/tasks
      */

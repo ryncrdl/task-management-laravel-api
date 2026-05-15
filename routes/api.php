@@ -106,6 +106,6 @@ Route::prefix('internal')->middleware(['throttle:120,1', 'internal.service'])->g
     Route::get('/tasks/upcoming-deadlines', [TaskController::class, 'upcomingDeadlines']);
     Route::get('/tasks/incomplete-by-user', [TaskController::class, 'incompleteByUser']);
     Route::get('/teams',                    [TeamController::class, 'indexInternal']);
-    Route::get('/teams/{team}/tasks',       [TaskController::class, 'index']);
+    Route::get('/teams/{team}/tasks',       [TaskController::class, 'indexInternal']);
     Route::delete('/tasks/{task}/archive',  [TaskController::class, 'archive']);
 });
