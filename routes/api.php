@@ -85,15 +85,7 @@ Route::middleware(['auth:api', 'active', 'throttle:120,1'])->group(function () {
     Route::post('/task-filter-presets', [TaskFilterPresetController::class, 'store']);
     Route::delete('/task-filter-presets/{preset}', [TaskFilterPresetController::class, 'destroy']);
 
-    // ─── Archival endpoint (Node.js cron) ────────────────────────────────────
-    Route::delete('/tasks/{task}/archive', [TaskController::class, 'archive'])
-        ->middleware('role:admin');
 
-    // ─── Internal endpoints (Node.js cron) ───────────────────────────────────
-    Route::prefix('internal')->middleware('role:admin')->group(function () {
-        Route::get('/tasks/upcoming-deadlines', [TaskController::class, 'upcomingDeadlines']);
-        Route::get('/tasks/incomplete-by-user', [TaskController::class, 'incompleteByUser']);
-    });
 
     // ─── Admin: Notification Jobs (React UI) ──────────────────────────────────
     Route::middleware('role:admin')->prefix('admin')->group(function () {
@@ -109,4 +101,11 @@ Route::prefix('internal')->middleware(['throttle:120,1', 'internal.service'])->g
     Route::post('/jobs',        [NotificationJobController::class, 'store']);
     Route::get('/jobs/pending', [NotificationJobController::class, 'claimPending']);
     Route::patch('/jobs/{id}',  [NotificationJobController::class, 'updateStatus']);
+
+    // ─── Cron job data endpoints (no expiring JWT) ────────────────────────────
+    Route::get('/tasks/upcoming-deadlines', [TaskController::class, 'upcomingDeadlines']);
+    Route::get('/tasks/incomplete-by-user', [TaskController::class, 'incompleteByUser']);
+    Route::get('/teams',                    [TeamController::class, 'index']);
+    Route::get('/teams/{team}/tasks',       [TaskController::class, 'index']);
+    Route::delete('/tasks/{task}/archive',  [TaskController::class, 'archive']);
 });
