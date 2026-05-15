@@ -36,6 +36,7 @@ Route::middleware(['auth:api', 'active', 'throttle:120,1'])->group(function () {
     });
 
     // ─── User Management ──────────────────────────────────────────────────────
+    Route::get('/users/directory', [UserController::class, 'directory']); // all roles
     Route::middleware('role:admin,manager')->group(function () {
         Route::get('/users', [UserController::class, 'index']);
         Route::post('/users', [UserController::class, 'store']);

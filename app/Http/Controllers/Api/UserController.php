@@ -62,6 +62,20 @@ class UserController extends Controller
     }
 
     /**
+     * Lightweight user list for assignment dropdowns — accessible to all roles.
+     * Returns only id, name, role for active users.
+     * GET /api/users/directory
+     */
+    public function directory(): JsonResponse
+    {
+        $users = User::where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name', 'role']);
+
+        return response()->json(['data' => $users]);
+    }
+
+    /**
      * Create a new user.
      * POST /api/users
      */
