@@ -11,6 +11,7 @@ RESTful API backend for the Task Management & Analytics Platform, built with **L
 | **API Base** | `https://task-management-laravel-api.onrender.com/api` |
 | **Health Check** | `https://task-management-laravel-api.onrender.com/up` |
 | **GitHub** | `https://github.com/ryncrdl/task-management-laravel-api` |
+| **Frontend** | `https://task-management-react-e9ni.onrender.com` |
 
 ---
 
