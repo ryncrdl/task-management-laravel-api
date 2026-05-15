@@ -293,6 +293,7 @@ class TaskController extends Controller
         }
 
         $newStatus = $request->status;
+        $oldStatus = $task->status;
 
         if (! $task->canTransitionTo($newStatus)) {
             return $this->error(
@@ -303,8 +304,8 @@ class TaskController extends Controller
 
         $task->update(['status' => $newStatus]);
 
-        // Notify Node.js of status change (task room + team room + assignee's personal room)
-        $this->notifyNodeService($task->fresh(), 'status_changed');
+        // Notify Node.js of status change (email)
+        $this->notifyNodeService($task->fresh(), 'status_changed', ['old_status' => $oldStatus]);
         $statusRooms = ["team:{$task->team_id}"];
         if ($task->assigned_to) $statusRooms[] = "user:{$task->assigned_to}";
         $this->broadcastToNode('task:status_changed', $statusRooms, [
@@ -315,7 +316,7 @@ class TaskController extends Controller
 
         Log::info('Task status updated', [
             'task_id' => $task->id,
-            'from' => $task->getOriginal('status'),
+            'from' => $oldStatus,
             'to' => $newStatus,
             'updated_by' => $authUser->id,
         ]);
@@ -442,7 +443,7 @@ class TaskController extends Controller
      * Notify the Node.js service about a task event (fire & forget).
      * Also broadcasts the event via Socket.io for real-time clients.
      */
-    private function notifyNodeService(Task $task, string $eventType): void
+    private function notifyNodeService(Task $task, string $eventType, array $extraDetails = []): void
     {
         $nodeUrl = rtrim(config('services.node.url', env('NODE_SERVICE_URL', '')), '/');
 
@@ -454,31 +455,21 @@ class TaskController extends Controller
             $serviceSecret = env('NODE_SERVICE_SECRET', '');
             $headers = ['X-Service-Secret' => $serviceSecret];
 
-            // Push in-app notification
             Http::timeout(3)->withHeaders($headers)->post("{$nodeUrl}/api/notifications/send", [
                 'task_id'    => $task->id,
                 'user_id'    => $task->assigned_to,
                 'event_type' => $eventType,
-                'details'    => [
-                    'task_title'  => $task->title,
-                    'task_status' => $task->status,
-                    'due_date'    => $task->due_date,
-                ],
-            ]);
-
-            // Real-time broadcast to Socket.io clients watching this task/team
-            Http::timeout(3)->withHeaders($headers)->post("{$nodeUrl}/api/broadcast", [
-                'event' => "task:{$eventType}",
-                'room'  => "task:{$task->id}",
-                'data'  => [
-                    'task_id'    => $task->id,
-                    'title'      => $task->title,
-                    'status'     => $task->status,
-                    'event_type' => $eventType,
-                ],
+                'details'    => array_merge([
+                    'task_title'         => $task->title,
+                    'task_status'        => $task->status,
+                    'priority'           => $task->priority,
+                    'due_date'           => $task->due_date,
+                    'team_name'          => $task->team?->name,
+                    'assigned_to_email'  => $task->assignedTo?->email,
+                    'assigned_to_name'   => $task->assignedTo?->name,
+                ], $extraDetails),
             ]);
         } catch (\Exception $e) {
-            // Log but don't fail the main request
             Log::warning('Node.js notification failed', [
                 'task_id' => $task->id,
                 'error' => $e->getMessage(),

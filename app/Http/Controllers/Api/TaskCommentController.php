@@ -160,6 +160,7 @@ class TaskCommentController extends Controller
             ]);
 
             try {
+                // Real-time WebSocket ping
                 Http::timeout(3)
                     ->withHeaders(['X-Service-Secret' => $serviceSecret])
                     ->post("{$nodeUrl}/api/broadcast", [
@@ -170,6 +171,23 @@ class TaskCommentController extends Controller
                             'task_title'   => $task->title,
                             'comment_body' => mb_substr($body, 0, 120),
                             'mentioned_by' => $authUser->name,
+                        ],
+                    ]);
+
+                // Email notification
+                Http::timeout(3)
+                    ->withHeaders(['X-Service-Secret' => $serviceSecret])
+                    ->post("{$nodeUrl}/api/notifications/send", [
+                        'task_id'    => $task->id,
+                        'user_id'    => $mentioned->id,
+                        'event_type' => 'mentioned',
+                        'details'    => [
+                            'task_title'         => $task->title,
+                            'team_name'          => $task->team?->name,
+                            'comment_body'       => mb_substr($body, 0, 200),
+                            'mentioned_by'       => $authUser->name,
+                            'assigned_to_email'  => $mentioned->email,
+                            'assigned_to_name'   => $mentioned->name,
                         ],
                     ]);
             } catch (\Exception $e) {

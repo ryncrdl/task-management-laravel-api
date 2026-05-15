@@ -9,6 +9,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class UserController extends Controller
@@ -235,6 +236,30 @@ class UserController extends Controller
             'changed_by' => $authUser->id,
             'user_id' => $user->id,
         ]);
+
+        // Send email notification for deactivation or reactivation
+        $nodeUrl       = rtrim(env('NODE_SERVICE_URL', ''), '/');
+        $serviceSecret = env('NODE_SERVICE_SECRET', '');
+        if (! empty($nodeUrl)) {
+            $eventType  = $user->is_active ? 'reactivated' : 'deactivated';
+            $detailsKey = $user->is_active ? 'reactivated_by' : 'deactivated_by';
+            try {
+                Http::timeout(3)
+                    ->withHeaders(['X-Service-Secret' => $serviceSecret])
+                    ->post("{$nodeUrl}/api/notifications/send", [
+                        'task_id'    => null,
+                        'user_id'    => $user->id,
+                        'event_type' => $eventType,
+                        'details'    => [
+                            'assigned_to_email' => $user->email,
+                            'assigned_to_name'  => $user->name,
+                            $detailsKey         => $authUser->name,
+                        ],
+                    ]);
+            } catch (\Exception $e) {
+                Log::warning(ucfirst($eventType) . ' notification failed', ['error' => $e->getMessage()]);
+            }
+        }
 
         return $this->success(
             ['id' => $user->id, 'is_active' => $user->is_active],

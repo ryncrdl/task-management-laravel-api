@@ -4,6 +4,7 @@ namespace App\Observers;
 
 use App\Models\ActivityLog;
 use App\Models\Task;
+use App\Models\User;
 
 class TaskObserver
 {
@@ -21,9 +22,20 @@ class TaskObserver
                 'title'       => $task->title,
                 'status'      => $task->status,
                 'priority'    => $task->priority,
-                'assigned_to' => $task->assigned_to,
+                'assigned_to' => $task->assigned_to
+                    ? (User::find($task->assigned_to)?->name ?? $task->assigned_to)
+                    : null,
             ],
         );
+    }
+
+    /** Resolve a user ID to a display name, or return the raw value if not a user field. */
+    private function resolveValue(string $field, mixed $value): mixed
+    {
+        if ($field === 'assigned_to' && $value !== null) {
+            return User::find($value)?->name ?? $value;
+        }
+        return $value;
     }
 
     public function updated(Task $task): void
@@ -37,8 +49,8 @@ class TaskObserver
         $old = [];
         $new = [];
         foreach ($dirty as $field => $newValue) {
-            $old[$field] = $task->getOriginal($field);
-            $new[$field] = $newValue;
+            $old[$field] = $this->resolveValue($field, $task->getOriginal($field));
+            $new[$field] = $this->resolveValue($field, $newValue);
         }
 
         $action = array_key_exists('status', $dirty) ? 'status_changed' : 'updated';
