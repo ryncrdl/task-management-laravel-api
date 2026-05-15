@@ -61,6 +61,7 @@ Route::middleware(['auth:api', 'active', 'throttle:120,1'])->group(function () {
     Route::post('/teams/{team}/tasks', [TaskController::class, 'store'])
         ->middleware('role:admin,manager');
 
+    Route::get('/tasks/mine', [TaskController::class, 'mine']); // all assigned tasks for current user
     Route::get('/tasks/{task}', [TaskController::class, 'show']);
     Route::patch('/tasks/{task}', [TaskController::class, 'update']);
     Route::delete('/tasks/{task}', [TaskController::class, 'destroy']);

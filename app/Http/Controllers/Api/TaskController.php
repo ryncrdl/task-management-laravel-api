@@ -19,6 +19,42 @@ use Illuminate\Support\Facades\Mail;
 class TaskController extends Controller
 {
     /**
+     * Return all tasks assigned to the authenticated user across all their teams.
+     * GET /api/tasks/mine
+     */
+    public function mine(Request $request): JsonResponse
+    {
+        $authUser = auth('api')->user();
+
+        $query = Task::with(['assignedTo:id,name,email', 'createdBy:id,name', 'team:id,name'])
+            ->where('assigned_to', $authUser->id);
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+        if ($request->filled('priority')) {
+            $query->where('priority', $request->priority);
+        }
+        if ($request->filled('search')) {
+            $s = '%' . addcslashes($request->search, '%_') . '%';
+            $query->where('title', 'ilike', $s);
+        }
+
+        $tasks = $query->orderBy('created_at', 'desc')
+            ->paginate($request->get('per_page', 20));
+
+        return response()->json([
+            'data' => $tasks->items(),
+            'meta' => [
+                'current_page' => $tasks->currentPage(),
+                'last_page'    => $tasks->lastPage(),
+                'per_page'     => $tasks->perPage(),
+                'total'        => $tasks->total(),
+            ],
+        ]);
+    }
+
+    /**
      * List tasks for a team with optional filters.
      * GET /api/teams/{team}/tasks
      */
@@ -183,9 +219,7 @@ class TaskController extends Controller
             $this->notifyNodeService($task->fresh(), 'assigned');
         }
 
-        $task->load(['assignedTo:id,name,email', 'createdBy:id,name']);
-
-        // Broadcast update to task room and team room
+        $task->load(['assignedTo:id,name,email', 'createdBy:id,name', 'team:id,name']);
         $this->broadcastToNode('task:updated', ["task:{$task->id}", "team:{$task->team_id}"], [
             'task_id'  => $task->id,
             'team_id'  => $task->team_id,
