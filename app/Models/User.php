@@ -109,4 +109,14 @@ class User extends Authenticatable implements JWTSubject
     {
         return $this->hasMany(Team::class, 'created_by');
     }
+
+    public function comments(): HasMany
+    {
+        return $this->hasMany(TaskComment::class);
+    }
+
+    public function filterPresets(): HasMany
+    {
+        return $this->hasMany(TaskFilterPreset::class);
+    }
 }

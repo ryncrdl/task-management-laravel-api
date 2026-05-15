@@ -1,0 +1,552 @@
+openapi: 3.0.3
+info:
+  title: Task Management Platform API
+  description: |
+    REST API for the Task Management & Analytics Platform.
+    All protected endpoints require a Bearer JWT obtained from `POST /api/auth/login`.
+  version: 1.0.0
+  contact:
+    name: TaskFlow API
+
+servers:
+  - url: https://task-management-laravel-api.onrender.com/api
+    description: Production
+  - url: http://localhost:8000/api
+    description: Local development
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:       { type: integer }
+        name:     { type: string }
+        email:    { type: string, format: email }
+        role:     { type: string, enum: [admin, manager, member] }
+        is_active: { type: boolean }
+
+    Task:
+      type: object
+      properties:
+        id:          { type: integer }
+        title:       { type: string }
+        description: { type: string, nullable: true }
+        status:      { type: string, enum: [pending, in_progress, completed, cancelled] }
+        priority:    { type: string, enum: [low, medium, high] }
+        assigned_to: { $ref: '#/components/schemas/User' }
+        created_by:  { $ref: '#/components/schemas/User' }
+        team_id:     { type: integer }
+        due_date:    { type: string, format: date-time, nullable: true }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+
+    Team:
+      type: object
+      properties:
+        id:         { type: integer }
+        name:       { type: string }
+        created_by: { type: integer }
+        members:    { type: array, items: { $ref: '#/components/schemas/User' } }
+
+    TaskComment:
+      type: object
+      properties:
+        id:         { type: integer }
+        task_id:    { type: integer }
+        user_id:    { type: integer }
+        body:       { type: string }
+        author:     { $ref: '#/components/schemas/User' }
+        created_at: { type: string, format: date-time }
+
+    ActivityLog:
+      type: object
+      properties:
+        id:           { type: integer }
+        user_id:      { type: integer, nullable: true }
+        action:       { type: string, enum: [created, updated, deleted, commented, status_changed] }
+        subject_type: { type: string }
+        subject_id:   { type: integer }
+        subject_name: { type: string, nullable: true }
+        old_values:   { type: object, nullable: true }
+        new_values:   { type: object, nullable: true }
+        actor:        { $ref: '#/components/schemas/User' }
+        created_at:   { type: string, format: date-time }
+
+    TaskFilterPreset:
+      type: object
+      properties:
+        id:      { type: integer }
+        user_id: { type: integer }
+        name:    { type: string }
+        filters: { type: object }
+
+    Pagination:
+      type: object
+      properties:
+        current_page: { type: integer }
+        last_page:    { type: integer }
+        per_page:     { type: integer }
+        total:        { type: integer }
+
+    Error:
+      type: object
+      properties:
+        message: { type: string }
+        errors:  { type: object }
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ── Auth ────────────────────────────────────────────────────────────────────
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, password_confirmation]
+              properties:
+                name:                  { type: string }
+                email:                 { type: string, format: email }
+                password:              { type: string, minLength: 8 }
+                password_confirmation: { type: string }
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      token:      { type: string }
+                      token_type: { type: string }
+                      expires_in: { type: integer }
+                      user:       { $ref: '#/components/schemas/User' }
+        '422': { description: Validation error }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and receive a JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:    { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      token:      { type: string }
+                      token_type: { type: string }
+                      user:       { $ref: '#/components/schemas/User' }
+        '401': { description: Invalid credentials }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh JWT
+      responses:
+        '200': { description: New token issued }
+        '401': { description: Token expired or invalid }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Invalidate the current JWT
+      responses:
+        '200': { description: Logged out }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get authenticated user profile
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+
+  # ── Tasks ───────────────────────────────────────────────────────────────────
+  /teams/{teamId}/tasks:
+    get:
+      tags: [Tasks]
+      summary: List tasks for a team
+      parameters:
+        - { name: teamId,      in: path,  required: true, schema: { type: integer } }
+        - { name: status,      in: query, schema: { type: string } }
+        - { name: priority,    in: query, schema: { type: string } }
+        - { name: assigned_to, in: query, schema: { type: integer } }
+        - { name: page,        in: query, schema: { type: integer } }
+        - { name: per_page,    in: query, schema: { type: integer } }
+      responses:
+        '200':
+          description: Paginated task list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Task' } }
+                  meta: { $ref: '#/components/schemas/Pagination' }
+    post:
+      tags: [Tasks]
+      summary: Create a task (admin/manager only)
+      parameters:
+        - { name: teamId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:       { type: string }
+                description: { type: string }
+                priority:    { type: string, enum: [low, medium, high] }
+                assigned_to: { type: integer }
+                due_date:    { type: string, format: date-time }
+      responses:
+        '201': { description: Task created }
+        '403': { description: Forbidden }
+
+  /tasks/{taskId}:
+    get:
+      tags: [Tasks]
+      summary: Get task details
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Task detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Task' }
+    patch:
+      tags: [Tasks]
+      summary: Update a task
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:       { type: string }
+                description: { type: string }
+                priority:    { type: string }
+                assigned_to: { type: integer }
+                due_date:    { type: string, format: date-time }
+      responses:
+        '200': { description: Updated }
+        '403': { description: Forbidden }
+    delete:
+      tags: [Tasks]
+      summary: Delete a task
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Deleted }
+        '403': { description: Forbidden }
+
+  /tasks/{taskId}/status:
+    patch:
+      tags: [Tasks]
+      summary: Update task status
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [pending, in_progress, completed, cancelled] }
+      responses:
+        '200': { description: Status updated }
+        '422': { description: Invalid status transition }
+
+  /tasks/batch:
+    post:
+      tags: [Tasks]
+      summary: Batch operation on multiple tasks (admin/manager only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, task_ids]
+              properties:
+                action:   { type: string, enum: [complete, cancel, delete] }
+                task_ids: { type: array, items: { type: integer }, minItems: 1, maxItems: 100 }
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      processed: { type: integer }
+                      skipped:   { type: integer }
+
+  # ── Comments ─────────────────────────────────────────────────────────────────
+  /tasks/{taskId}/comments:
+    get:
+      tags: [Comments]
+      summary: List comments on a task
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Comments list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/TaskComment' } }
+    post:
+      tags: [Comments]
+      summary: Post a comment on a task
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, maxLength: 2000 }
+      responses:
+        '201': { description: Comment created }
+        '422': { description: Validation error }
+
+  /tasks/{taskId}/comments/{commentId}:
+    delete:
+      tags: [Comments]
+      summary: Delete a comment (own or admin)
+      parameters:
+        - { name: taskId,    in: path, required: true, schema: { type: integer } }
+        - { name: commentId, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Deleted }
+        '403': { description: Forbidden }
+
+  # ── Activity Log ─────────────────────────────────────────────────────────────
+  /activity-logs:
+    get:
+      tags: [Activity Log]
+      summary: List activity logs
+      parameters:
+        - { name: task_id,  in: query, schema: { type: integer } }
+        - { name: user_id,  in: query, schema: { type: integer } }
+        - { name: action,   in: query, schema: { type: string } }
+        - { name: per_page, in: query, schema: { type: integer } }
+        - { name: page,     in: query, schema: { type: integer } }
+      responses:
+        '200':
+          description: Paginated activity logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ActivityLog' } }
+                  meta: { $ref: '#/components/schemas/Pagination' }
+
+  # ── Filter Presets ────────────────────────────────────────────────────────────
+  /task-filter-presets:
+    get:
+      tags: [Filter Presets]
+      summary: List the authenticated user's filter presets
+      responses:
+        '200':
+          description: Preset list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/TaskFilterPreset' } }
+    post:
+      tags: [Filter Presets]
+      summary: Save a new filter preset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, filters]
+              properties:
+                name:    { type: string, maxLength: 100 }
+                filters: { type: object }
+      responses:
+        '201': { description: Preset saved }
+
+  /task-filter-presets/{presetId}:
+    delete:
+      tags: [Filter Presets]
+      summary: Delete a filter preset
+      parameters:
+        - { name: presetId, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Deleted }
+        '403': { description: Forbidden }
+
+  # ── Teams ─────────────────────────────────────────────────────────────────────
+  /teams:
+    get:
+      tags: [Teams]
+      summary: List teams
+      responses:
+        '200': { description: Team list }
+    post:
+      tags: [Teams]
+      summary: Create a team (admin/manager only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '201': { description: Team created }
+
+  /teams/{teamId}:
+    get:
+      tags: [Teams]
+      summary: Get team details with members
+      parameters:
+        - { name: teamId, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Team detail }
+
+  /teams/{teamId}/members:
+    post:
+      tags: [Teams]
+      summary: Add a member to a team (admin/manager only)
+      parameters:
+        - { name: teamId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: integer }
+                role:    { type: string, enum: [member, lead], default: member }
+      responses:
+        '200': { description: Member added }
+
+  /teams/{teamId}/members/{userId}:
+    delete:
+      tags: [Teams]
+      summary: Remove a member from a team (admin/manager only)
+      parameters:
+        - { name: teamId, in: path, required: true, schema: { type: integer } }
+        - { name: userId, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Member removed }
+
+  # ── Users ─────────────────────────────────────────────────────────────────────
+  /users:
+    get:
+      tags: [Users]
+      summary: List users (admin/manager only)
+      responses:
+        '200': { description: User list }
+    post:
+      tags: [Users]
+      summary: Create a user (admin/manager only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, role]
+              properties:
+                name:     { type: string }
+                email:    { type: string, format: email }
+                password: { type: string }
+                role:     { type: string, enum: [admin, manager, member] }
+      responses:
+        '201': { description: User created }
+
+  /users/{userId}/status:
+    patch:
+      tags: [Users]
+      summary: Toggle user active/inactive
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Status toggled }
+
+  # ── Health ────────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      security: []
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:  { type: string, example: ok }
+                  service: { type: string, example: laravel-api }

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Task\StoreTaskRequest;
 use App\Http\Requests\Task\UpdateTaskRequest;
 use App\Http\Requests\Task\UpdateTaskStatusRequest;
+use App\Mail\TaskAssignedMail;
 use App\Models\Task;
 use App\Models\Team;
 use Illuminate\Http\JsonResponse;
@@ -13,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class TaskController extends Controller
 {
@@ -48,6 +50,14 @@ class TaskController extends Controller
 
         if ($request->filled('assigned_to')) {
             $query->where('assigned_to', $request->assigned_to);
+        }
+
+        if ($request->filled('search')) {
+            $term = '%' . $request->search . '%';
+            $query->where(function ($q) use ($term) {
+                $q->where('title', 'ilike', $term)
+                  ->orWhere('description', 'ilike', $term);
+            });
         }
 
         $tasks = $query->orderBy('created_at', 'desc')
@@ -95,7 +105,31 @@ class TaskController extends Controller
         // Notify Node.js service asynchronously (fire & forget)
         if ($task->assigned_to) {
             $this->notifyNodeService($task, 'assigned');
+
+            // Send email notification to the assignee
+            try {
+                $assignee = $task->assignedTo;
+                if ($assignee && config('mail.default') !== 'log' || config('mail.mailers.smtp.host')) {
+                    Mail::to($assignee->email)->send(
+                        new TaskAssignedMail($task, $assignee, $authUser)
+                    );
+                }
+            } catch (\Exception $e) {
+                Log::warning('Task assignment email failed', [
+                    'task_id' => $task->id,
+                    'error'   => $e->getMessage(),
+                ]);
+            }
         }
+
+        // Broadcast task created to team room
+        $this->broadcastToNode('task:created', ["team:{$task->team_id}"], [
+            'task_id'  => $task->id,
+            'team_id'  => $task->team_id,
+            'title'    => $task->title,
+            'status'   => $task->status,
+            'priority' => $task->priority,
+        ]);
 
         Log::info('Task created', ['task_id' => $task->id, 'created_by' => $authUser->id]);
 
@@ -151,6 +185,15 @@ class TaskController extends Controller
 
         $task->load(['assignedTo:id,name,email', 'createdBy:id,name']);
 
+        // Broadcast update to task room and team room
+        $this->broadcastToNode('task:updated', ["task:{$task->id}", "team:{$task->team_id}"], [
+            'task_id'  => $task->id,
+            'team_id'  => $task->team_id,
+            'title'    => $task->title,
+            'status'   => $task->status,
+            'priority' => $task->priority,
+        ]);
+
         Log::info('Task updated', ['task_id' => $task->id, 'updated_by' => $authUser->id]);
 
         return $this->success($task, 'Task updated successfully.');
@@ -177,9 +220,17 @@ class TaskController extends Controller
             return $this->error('Managers can only delete tasks within their own team.', 403);
         }
 
+        $teamId = $task->team_id;
+        $taskId = $task->id;
         $task->delete(); // soft delete
 
-        Log::info('Task deleted', ['task_id' => $task->id, 'deleted_by' => $authUser->id]);
+        // Broadcast deletion to task room and team room
+        $this->broadcastToNode('task:deleted', ["task:{$taskId}", "team:{$teamId}"], [
+            'task_id' => $taskId,
+            'team_id' => $teamId,
+        ]);
+
+        Log::info('Task deleted', ['task_id' => $taskId, 'deleted_by' => $authUser->id]);
 
         return $this->success(null, 'Task deleted successfully.');
     }
@@ -207,8 +258,13 @@ class TaskController extends Controller
 
         $task->update(['status' => $newStatus]);
 
-        // Notify Node.js of status change
+        // Notify Node.js of status change (task room + team room)
         $this->notifyNodeService($task->fresh(), 'status_changed');
+        $this->broadcastToNode('task:status_changed', ["team:{$task->team_id}"], [
+            'task_id' => $task->id,
+            'team_id' => $task->team_id,
+            'status'  => $newStatus,
+        ]);
 
         Log::info('Task status updated', [
             'task_id' => $task->id,
@@ -314,7 +370,29 @@ class TaskController extends Controller
     }
 
     /**
+     * Broadcast an event to one or more Socket.io rooms via Node.js (fire & forget).
+     */
+    private function broadcastToNode(string $event, array $rooms, array $data): void
+    {
+        $nodeUrl = rtrim(env('NODE_SERVICE_URL', ''), '/');
+        if (empty($nodeUrl)) return;
+
+        try {
+            Http::timeout(3)
+                ->withHeaders(['X-Service-Secret' => env('NODE_SERVICE_SECRET', '')])
+                ->post("{$nodeUrl}/api/broadcast", [
+                    'event' => $event,
+                    'rooms' => $rooms,
+                    'data'  => $data,
+                ]);
+        } catch (\Exception $e) {
+            Log::warning('broadcastToNode failed', ['event' => $event, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
      * Notify the Node.js service about a task event (fire & forget).
+     * Also broadcasts the event via Socket.io for real-time clients.
      */
     private function notifyNodeService(Task $task, string $eventType): void
     {
@@ -325,14 +403,30 @@ class TaskController extends Controller
         }
 
         try {
-            Http::timeout(3)->post("{$nodeUrl}/api/notifications/send", [
-                'task_id' => $task->id,
-                'user_id' => $task->assigned_to,
+            $serviceSecret = env('NODE_SERVICE_SECRET', '');
+            $headers = ['X-Service-Secret' => $serviceSecret];
+
+            // Push in-app notification
+            Http::timeout(3)->withHeaders($headers)->post("{$nodeUrl}/api/notifications/send", [
+                'task_id'    => $task->id,
+                'user_id'    => $task->assigned_to,
                 'event_type' => $eventType,
-                'details' => [
-                    'task_title' => $task->title,
+                'details'    => [
+                    'task_title'  => $task->title,
                     'task_status' => $task->status,
-                    'due_date' => $task->due_date,
+                    'due_date'    => $task->due_date,
+                ],
+            ]);
+
+            // Real-time broadcast to Socket.io clients watching this task/team
+            Http::timeout(3)->withHeaders($headers)->post("{$nodeUrl}/api/broadcast", [
+                'event' => "task:{$eventType}",
+                'room'  => "task:{$task->id}",
+                'data'  => [
+                    'task_id'    => $task->id,
+                    'title'      => $task->title,
+                    'status'     => $task->status,
+                    'event_type' => $eventType,
                 ],
             ]);
         } catch (\Exception $e) {
@@ -343,4 +437,46 @@ class TaskController extends Controller
             ]);
         }
     }
+
+    /**
+     * Perform a batch operation on multiple tasks.
+     * POST /api/tasks/batch
+     *
+     * Body: { "action": "complete|cancel|delete", "task_ids": [1,2,3] }
+     */
+    public function batch(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'action'     => 'required|in:complete,cancel,delete',
+            'task_ids'   => 'required|array|min:1|max:100',
+            'task_ids.*' => 'integer|exists:tasks,id',
+        ]);
+
+        $authUser  = auth('api')->user();
+        $tasks     = Task::whereIn('id', $validated['task_ids'])->get();
+        $processed = 0;
+        $skipped   = 0;
+
+        foreach ($tasks as $task) {
+            // Members cannot batch-modify tasks
+            if (! $this->canModifyTask($authUser, $task)) {
+                $skipped++;
+                continue;
+            }
+
+            match ($validated['action']) {
+                'complete' => $task->update(['status' => Task::STATUS_COMPLETED]),
+                'cancel'   => $task->update(['status' => Task::STATUS_CANCELLED]),
+                'delete'   => $task->delete(),
+            };
+
+            $processed++;
+        }
+
+        return $this->success(
+            ['processed' => $processed, 'skipped' => $skipped],
+            "Batch {$validated['action']} completed.",
+        );
+    }
 }
+

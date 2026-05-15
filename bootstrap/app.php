@@ -15,12 +15,20 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->alias([
-            'role' => \App\Http\Middleware\CheckRole::class,
-            'active' => \App\Http\Middleware\EnsureUserIsActive::class,
+            'role'     => \App\Http\Middleware\CheckRole::class,
+            'active'   => \App\Http\Middleware\EnsureUserIsActive::class,
+            'log.api'  => \App\Http\Middleware\LogRequestResponse::class,
         ]);
+
+        // Apply request/response logging to all API routes
+        $middleware->appendToGroup('api', \App\Http\Middleware\LogRequestResponse::class);
 
         // Trust all proxies for deployment behind load balancers
         $middleware->trustProxies(at: '*');
+    })
+    ->booted(function () {
+        // Register model observers
+        \App\Models\Task::observe(\App\Observers\TaskObserver::class);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // Return JSON for all API exceptions

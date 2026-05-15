@@ -8,6 +8,7 @@ use App\Http\Requests\User\UpdateUserRequest;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 
 class UserController extends Controller
@@ -136,6 +137,62 @@ class UserController extends Controller
         Log::info('User updated', ['updated_by' => $authUser->id, 'user_id' => $user->id]);
 
         return $this->success($user, 'User updated successfully.');
+    }
+
+    /**
+     * Change the authenticated user's own password.
+     * PATCH /api/auth/password
+     */
+    public function changePassword(Request $request): JsonResponse
+    {
+        $authUser = auth('api')->user();
+
+        $request->validate([
+            'current_password' => 'required|string',
+            'new_password'     => 'required|string|min:8|confirmed',
+        ]);
+
+        if (!Hash::check($request->current_password, $authUser->password)) {
+            return $this->error('Current password is incorrect.', 422);
+        }
+
+        $authUser->update(['password' => Hash::make($request->new_password)]);
+
+        Log::info('Password changed', ['user_id' => $authUser->id]);
+
+        return $this->success(null, 'Password changed successfully.');
+    }
+
+    /**
+     * Admin / Manager resets another user's password (no current password needed).
+     * PATCH /api/users/{id}/password
+     */
+    public function resetPassword(Request $request, User $user): JsonResponse
+    {
+        $authUser = auth('api')->user();
+
+        // Managers can only reset members, not other admins/managers
+        if ($authUser->isManager() && ! $user->isMember()) {
+            return $this->error('Managers can only reset passwords for team members.', 403);
+        }
+
+        // Prevent resetting own password via this endpoint (use /auth/password instead)
+        if ($authUser->id === $user->id) {
+            return $this->error('Use the change-password endpoint to update your own password.', 403);
+        }
+
+        $request->validate([
+            'new_password' => 'required|string|min:8|confirmed',
+        ]);
+
+        $user->update(['password' => Hash::make($request->new_password)]);
+
+        Log::info('Password reset by admin/manager', [
+            'reset_by' => $authUser->id,
+            'user_id'  => $user->id,
+        ]);
+
+        return $this->success(null, "Password for {$user->name} has been reset.");
     }
 
     /**
