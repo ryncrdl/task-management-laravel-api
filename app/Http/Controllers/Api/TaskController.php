@@ -158,8 +158,10 @@ class TaskController extends Controller
             }
         }
 
-        // Broadcast task created to team room
-        $this->broadcastToNode('task:created', ["team:{$task->team_id}"], [
+        // Broadcast task created to team room + assignee's personal room
+        $createdRooms = ["team:{$task->team_id}"];
+        if ($task->assigned_to) $createdRooms[] = "user:{$task->assigned_to}";
+        $this->broadcastToNode('task:created', $createdRooms, [
             'task_id'  => $task->id,
             'team_id'  => $task->team_id,
             'title'    => $task->title,
@@ -220,12 +222,18 @@ class TaskController extends Controller
         }
 
         $task->load(['assignedTo:id,name,email', 'createdBy:id,name', 'team:id,name']);
-        $this->broadcastToNode('task:updated', ["task:{$task->id}", "team:{$task->team_id}"], [
-            'task_id'  => $task->id,
-            'team_id'  => $task->team_id,
-            'title'    => $task->title,
-            'status'   => $task->status,
-            'priority' => $task->priority,
+        // Always notify current assignee; also notify previous assignee so they
+        // can remove the task from their list if it was reassigned away from them.
+        $updatedRooms = ["task:{$task->id}", "team:{$task->team_id}"];
+        if ($task->assigned_to) $updatedRooms[] = "user:{$task->assigned_to}";
+        if ($previousAssignee && $previousAssignee !== $task->assigned_to) $updatedRooms[] = "user:{$previousAssignee}";
+        $this->broadcastToNode('task:updated', $updatedRooms, [
+            'task_id'     => $task->id,
+            'team_id'     => $task->team_id,
+            'title'       => $task->title,
+            'status'      => $task->status,
+            'priority'    => $task->priority,
+            'assigned_to' => $task->assigned_to,
         ]);
 
         Log::info('Task updated', ['task_id' => $task->id, 'updated_by' => $authUser->id]);
@@ -254,12 +262,15 @@ class TaskController extends Controller
             return $this->error('Managers can only delete tasks within their own team.', 403);
         }
 
-        $teamId = $task->team_id;
-        $taskId = $task->id;
+        $teamId     = $task->team_id;
+        $taskId     = $task->id;
+        $assignedTo = $task->assigned_to;
         $task->delete(); // soft delete
 
-        // Broadcast deletion to task room and team room
-        $this->broadcastToNode('task:deleted', ["task:{$taskId}", "team:{$teamId}"], [
+        // Broadcast deletion to task room, team room, and assignee's personal room
+        $deletedRooms = ["task:{$taskId}", "team:{$teamId}"];
+        if ($assignedTo) $deletedRooms[] = "user:{$assignedTo}";
+        $this->broadcastToNode('task:deleted', $deletedRooms, [
             'task_id' => $taskId,
             'team_id' => $teamId,
         ]);
@@ -292,9 +303,11 @@ class TaskController extends Controller
 
         $task->update(['status' => $newStatus]);
 
-        // Notify Node.js of status change (task room + team room)
+        // Notify Node.js of status change (task room + team room + assignee's personal room)
         $this->notifyNodeService($task->fresh(), 'status_changed');
-        $this->broadcastToNode('task:status_changed', ["team:{$task->team_id}"], [
+        $statusRooms = ["team:{$task->team_id}"];
+        if ($task->assigned_to) $statusRooms[] = "user:{$task->assigned_to}";
+        $this->broadcastToNode('task:status_changed', $statusRooms, [
             'task_id' => $task->id,
             'team_id' => $task->team_id,
             'status'  => $newStatus,
