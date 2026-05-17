@@ -420,18 +420,18 @@ class TaskController extends Controller
             return true;
         }
 
-        // Members can always access tasks assigned to them regardless of team
-        if ($user->isMember()) {
-            return $task->assigned_to === $user->id;
+        // Anyone can access a task that is directly assigned to them
+        if ($task->assigned_to === $user->id) {
+            return true;
         }
 
-        // Managers must be in the same team
-        $team = $task->team;
-        if (! $team || ! $team->hasMember($user)) {
-            return false;
+        // Managers can also access any task within their team
+        if ($user->isManager()) {
+            $team = $task->team;
+            return $team && $team->hasMember($user);
         }
 
-        return true;
+        return false;
     }
 
     private function canModifyTask(\App\Models\User $user, Task $task): bool
@@ -440,18 +440,18 @@ class TaskController extends Controller
             return true;
         }
 
-        // Members can only edit tasks assigned to them
-        if ($user->isMember()) {
-            return $task->assigned_to === $user->id;
+        // Anyone can modify a task that is directly assigned to them
+        if ($task->assigned_to === $user->id) {
+            return true;
         }
 
-        // Managers must be in the same team
-        $team = $task->team;
-        if (! $team || ! $team->hasMember($user)) {
-            return false;
+        // Managers can also modify any task within their team
+        if ($user->isManager()) {
+            $team = $task->team;
+            return $team && $team->hasMember($user);
         }
 
-        return true;
+        return false;
     }
 
     /**
