@@ -151,13 +151,17 @@ class TaskCommentController extends Controller
                 'mentioned_name'    => $mentioned->name,
             ]);
 
-            // Persist notification so it survives page refresh
-            Notification::create([
-                'user_id' => $mentioned->id,
-                'type'    => 'mentioned',
-                'message' => "{$authUser->name} mentioned you in \"{$task->title}\"",
-                'task_id' => $task->id,
-            ]);
+            try {
+                // Persist notification so it survives page refresh
+                Notification::create([
+                    'user_id' => $mentioned->id,
+                    'type'    => 'mentioned',
+                    'message' => "{$authUser->name} mentioned you in \"{$task->title}\"",
+                    'task_id' => $task->id,
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('broadcastMentions: failed to save notification to DB', ['error' => $e->getMessage()]);
+            }
 
             try {
                 // Real-time WebSocket ping

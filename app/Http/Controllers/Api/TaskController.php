@@ -171,12 +171,16 @@ class TaskController extends Controller
         // Node.js handles the assignment email; no synchronous SMTP call here.
         if ($task->assigned_to) {
             $this->notifyNodeService($task, 'assigned');
-            Notification::create([
-                'user_id' => $task->assigned_to,
-                'type'    => 'assigned',
-                'message' => "You have been assigned a new task: \"{$task->title}\"",
-                'task_id' => $task->id,
-            ]);
+            try {
+                Notification::create([
+                    'user_id' => $task->assigned_to,
+                    'type'    => 'assigned',
+                    'message' => "You have been assigned a new task: \"{$task->title}\"",
+                    'task_id' => $task->id,
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('Failed to save assignment notification', ['error' => $e->getMessage()]);
+            }
         }
 
         // Broadcast task created to team room + assignee's personal room
@@ -241,12 +245,16 @@ class TaskController extends Controller
         // Notify if task was reassigned
         if ($request->filled('assigned_to') && $request->assigned_to !== $previousAssignee) {
             $this->notifyNodeService($task->fresh(), 'assigned');
-            Notification::create([
-                'user_id' => $task->assigned_to,
-                'type'    => 'assigned',
-                'message' => "You have been assigned to task: \"{$task->title}\"",
-                'task_id' => $task->id,
-            ]);
+            try {
+                Notification::create([
+                    'user_id' => $task->assigned_to,
+                    'type'    => 'assigned',
+                    'message' => "You have been assigned to task: \"{$task->title}\"",
+                    'task_id' => $task->id,
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('Failed to save assignment notification', ['error' => $e->getMessage()]);
+            }
         }
 
         $task->load(['assignedTo:id,name,email', 'createdBy:id,name', 'team:id,name']);
