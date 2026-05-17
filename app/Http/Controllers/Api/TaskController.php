@@ -176,11 +176,12 @@ class TaskController extends Controller
         $createdRooms = ["team:{$task->team_id}"];
         if ($task->assigned_to) $createdRooms[] = "user:{$task->assigned_to}";
         $this->broadcastToNode('task:created', $createdRooms, [
-            'task_id'  => $task->id,
-            'team_id'  => $task->team_id,
-            'title'    => $task->title,
-            'status'   => $task->status,
-            'priority' => $task->priority,
+            'task_id'     => $task->id,
+            'team_id'     => $task->team_id,
+            'title'       => $task->title,
+            'status'      => $task->status,
+            'priority'    => $task->priority,
+            'assigned_to' => $task->assigned_to,
         ]);
 
         Log::info('Task created', ['task_id' => $task->id, 'created_by' => $authUser->id]);
