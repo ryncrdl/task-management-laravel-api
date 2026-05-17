@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\NotificationJobController;
 use App\Http\Controllers\Api\TaskCommentController;
 use App\Http\Controllers\Api\TaskController;
@@ -84,6 +85,11 @@ Route::middleware(['auth:api', 'active', 'throttle:120,1'])->group(function () {
     Route::get('/task-filter-presets', [TaskFilterPresetController::class, 'index']);
     Route::post('/task-filter-presets', [TaskFilterPresetController::class, 'store']);
     Route::delete('/task-filter-presets/{preset}', [TaskFilterPresetController::class, 'destroy']);
+
+    // ─── In-App Notifications ─────────────────────────────────────────────────
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::post('/notifications/mark-all-read', [NotificationController::class, 'markAllRead']);
+    Route::delete('/notifications', [NotificationController::class, 'clearAll']);
 
 
 

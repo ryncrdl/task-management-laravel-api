@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
+use App\Models\Notification;
 use App\Models\Task;
 use App\Models\TaskComment;
 use App\Models\User;
@@ -132,40 +133,30 @@ class TaskCommentController extends Controller
             return;
         }
 
-        // Extract every @Name pattern from the comment body.
-        // This handles names with spaces (e.g. "@John Smith").
-        // Pattern: @ followed by 1+ word chars or spaces (greedy), until end of
-        // word boundary or punctuation.
-        preg_match_all('/@([\w][^\s@,!?.]*(?:\s+[\w][^\s@,!?.]*)*)/u', $body, $matches);
+        // Load all users once, then check each name against the comment body.
+        // This works regardless of team membership (admins, cross-team mentions, etc.)
+        $users = User::select('id', 'name', 'email')
+            ->where('id', '!=', $authUser->id)
+            ->get();
 
-        $mentionedNames = array_unique(array_filter(array_map('trim', $matches[1] ?? [])));
-
-        if (empty($mentionedNames)) {
-            return;
-        }
-
-        Log::info('broadcastMentions: extracted names', [
-            'task_id' => $task->id,
-            'names'   => $mentionedNames,
-        ]);
-
-        foreach ($mentionedNames as $name) {
-            // Find the user by exact name (case-insensitive)
-            $mentioned = User::whereRaw('LOWER(name) = ?', [strtolower($name)])->first();
-
-            if (!$mentioned) {
-                Log::info('broadcastMentions: no user found for name', ['name' => $name]);
-                continue;
-            }
-
-            // Never notify the author about their own mention
-            if ($mentioned->id === $authUser->id) {
+        foreach ($users as $mentioned) {
+            $escapedName = preg_quote($mentioned->name, '/');
+            // Match @Name followed by a word boundary, space, punctuation, or end of string
+            if (!preg_match('/@' . $escapedName . '(?=\s|$|[,!?.\n])/iu', $body)) {
                 continue;
             }
 
             Log::info('broadcastMentions: notifying user', [
                 'mentioned_user_id' => $mentioned->id,
                 'mentioned_name'    => $mentioned->name,
+            ]);
+
+            // Persist notification so it survives page refresh
+            Notification::create([
+                'user_id' => $mentioned->id,
+                'type'    => 'mentioned',
+                'message' => "{$authUser->name} mentioned you in \"{$task->title}\"",
+                'task_id' => $task->id,
             ]);
 
             try {

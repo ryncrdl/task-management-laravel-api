@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Task\StoreTaskRequest;
 use App\Http\Requests\Task\UpdateTaskRequest;
 use App\Http\Requests\Task\UpdateTaskStatusRequest;
+use App\Models\Notification;
 use App\Models\Task;
 use App\Models\Team;
 use Illuminate\Http\JsonResponse;
@@ -170,6 +171,12 @@ class TaskController extends Controller
         // Node.js handles the assignment email; no synchronous SMTP call here.
         if ($task->assigned_to) {
             $this->notifyNodeService($task, 'assigned');
+            Notification::create([
+                'user_id' => $task->assigned_to,
+                'type'    => 'assigned',
+                'message' => "You have been assigned a new task: \"{$task->title}\"",
+                'task_id' => $task->id,
+            ]);
         }
 
         // Broadcast task created to team room + assignee's personal room
@@ -234,6 +241,12 @@ class TaskController extends Controller
         // Notify if task was reassigned
         if ($request->filled('assigned_to') && $request->assigned_to !== $previousAssignee) {
             $this->notifyNodeService($task->fresh(), 'assigned');
+            Notification::create([
+                'user_id' => $task->assigned_to,
+                'type'    => 'assigned',
+                'message' => "You have been assigned to task: \"{$task->title}\"",
+                'task_id' => $task->id,
+            ]);
         }
 
         $task->load(['assignedTo:id,name,email', 'createdBy:id,name', 'team:id,name']);
