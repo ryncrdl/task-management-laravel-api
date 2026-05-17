@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
 use App\Models\Task;
 use App\Models\TaskComment;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -121,7 +122,6 @@ class TaskCommentController extends Controller
     {
         // Skip if body contains no @ at all
         if (!str_contains($body, '@')) {
-            Log::info('broadcastMentions: no @ in body', ['task_id' => $task->id]);
             return;
         }
 
@@ -132,29 +132,38 @@ class TaskCommentController extends Controller
             return;
         }
 
-        // Load the task team with its members
-        $team = $task->team;
-        if (!$team) {
-            Log::info('broadcastMentions: task has no team', ['task_id' => $task->id]);
+        // Extract every @Name pattern from the comment body.
+        // This handles names with spaces (e.g. "@John Smith").
+        // Pattern: @ followed by 1+ word chars or spaces (greedy), until end of
+        // word boundary or punctuation.
+        preg_match_all('/@([\w][^\s@,!?.]*(?:\s+[\w][^\s@,!?.]*)*)/u', $body, $matches);
+
+        $mentionedNames = array_unique(array_filter(array_map('trim', $matches[1] ?? [])));
+
+        if (empty($mentionedNames)) {
             return;
         }
 
-        $members = $team->members()->get();
-        Log::info('broadcastMentions: scanning members', [
-            'task_id'      => $task->id,
-            'body_excerpt' => mb_substr($body, 0, 80),
-            'member_count' => $members->count(),
+        Log::info('broadcastMentions: extracted names', [
+            'task_id' => $task->id,
+            'names'   => $mentionedNames,
         ]);
 
-        foreach ($members as $mentioned) {
+        foreach ($mentionedNames as $name) {
+            // Find the user by exact name (case-insensitive)
+            $mentioned = User::whereRaw('LOWER(name) = ?', [strtolower($name)])->first();
+
+            if (!$mentioned) {
+                Log::info('broadcastMentions: no user found for name', ['name' => $name]);
+                continue;
+            }
+
             // Never notify the author about their own mention
-            if ($mentioned->id === $authUser->id) continue;
+            if ($mentioned->id === $authUser->id) {
+                continue;
+            }
 
-            // Build a case-insensitive pattern: @Ryan Cordial
-            $escapedName = preg_quote($mentioned->name, '/');
-            if (!preg_match('/@' . $escapedName . '/iu', $body)) continue;
-
-            Log::info('broadcastMentions: found mention', [
+            Log::info('broadcastMentions: notifying user', [
                 'mentioned_user_id' => $mentioned->id,
                 'mentioned_name'    => $mentioned->name,
             ]);
@@ -191,7 +200,10 @@ class TaskCommentController extends Controller
                         ],
                     ]);
             } catch (\Exception $e) {
-                Log::warning('Mention notification failed', ['error' => $e->getMessage()]);
+                Log::warning('Mention notification failed', [
+                    'user_id' => $mentioned->id,
+                    'error'   => $e->getMessage(),
+                ]);
             }
         }
     }
